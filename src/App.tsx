@@ -10,7 +10,7 @@ type BudgetMap = Record<string, number>
 
 const DEFAULT_BUDGETS: BudgetMap = {
   Groceries: 400, Dining: 200, Fuel: 150, Shopping: 200,
-  Utilities: 300, Rent: 1200, Entertainment: 120, Misc: 100,
+  Utilities: 300, Rent: 1200, Entertainment: 120, Misc: 100, Subscriptions: 50,
 }
 const DEFAULT_CATS = Object.keys(DEFAULT_BUDGETS)
 
@@ -29,6 +29,49 @@ function todayDayOfMonth(): number { return new Date().getDate() }
 
 type Insight = { title: string, detail: string }
 
+// Small inline toolbar component (kept in this file for simplicity)
+function TxToolbar(props:{
+  q:string, setQ:(v:string)=>void,
+  cat:string, setCat:(v:string)=>void,
+  min:string, setMin:(v:string)=>void,
+  max:string, setMax:(v:string)=>void,
+  rowsPerPage:number, setRowsPerPage:(n:number)=>void,
+}) {
+  return (
+    <div className="mb-3 grid md:grid-cols-5 gap-2">
+      <input
+        className="border rounded px-2 py-2"
+        placeholder="Search merchant…"
+        value={props.q}
+        onChange={(e)=>props.setQ(e.target.value)}
+      />
+      <select
+        className="border rounded px-2 py-2"
+        value={props.cat}
+        onChange={(e)=>props.setCat(e.target.value)}
+      >
+        <option value="__ALL__">All categories</option>
+        {DEFAULT_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <input
+        type="number" step="0.01" className="border rounded px-2 py-2"
+        placeholder="Min $" value={props.min} onChange={(e)=>props.setMin(e.target.value)}
+      />
+      <input
+        type="number" step="0.01" className="border rounded px-2 py-2"
+        placeholder="Max $" value={props.max} onChange={(e)=>props.setMax(e.target.value)}
+      />
+      <select
+        className="border rounded px-2 py-2"
+        value={String(props.rowsPerPage)}
+        onChange={(e)=>props.setRowsPerPage(Number(e.target.value))}
+      >
+        {[20,50,100].map(n => <option key={n} value={n}>{n} / page</option>)}
+      </select>
+    </div>
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState<import('@supabase/supabase-js').Session | null>(null)
   const [loading, setLoading] = useState(true)
@@ -36,6 +79,14 @@ export default function App() {
   const [budgets, setBudgets] = useState<BudgetMap>(DEFAULT_BUDGETS)
   const [insights, setInsights] = useState<Insight[]>([])
   const [rules, setRules] = useState<Record<string, string>>({})
+
+  // Filters & pagination
+  const [q, setQ] = useState('')
+  const [catFilter, setCatFilter] = useState('__ALL__')
+  const [minAmt, setMinAmt] = useState('')
+  const [maxAmt, setMaxAmt] = useState('')
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(50)
 
   // Auth session
   useEffect(() => {
@@ -66,6 +117,11 @@ export default function App() {
         const merged: BudgetMap = { ...DEFAULT_BUDGETS }
         for (const row of b) merged[row.category] = Number(row.limit_amount)
         setBudgets(merged)
+        // ensure Subscriptions row persists
+        await supa.from('budgets').upsert(
+          { user_id: userId, category: 'Subscriptions', limit_amount: merged['Subscriptions'] ?? 50, month, year },
+          { onConflict: 'user_id,category,month,year' }
+        )
       }
 
       // Transactions (this month)
@@ -216,6 +272,26 @@ export default function App() {
 
   if (loading) return <div className="p-6 text-gray-600">Loading…</div>
 
+  // Filtering + pagination
+  const filteredTxs = useMemo(() => {
+    const qlc = q.trim().toLowerCase()
+    const min = minAmt ? Number(minAmt) : -Infinity
+    const max = maxAmt ? Number(maxAmt) : +Infinity
+    return monthTxs.filter(t => {
+      if (qlc && !t.merchant.toLowerCase().includes(qlc)) return false
+      if (catFilter !== '__ALL__' && t.category !== catFilter) return false
+      if (!(t.amount >= min && t.amount <= max)) return false
+      return true
+    })
+  }, [monthTxs, q, catFilter, minAmt, maxAmt])
+
+  const totalPages = Math.max(1, Math.ceil(filteredTxs.length / rowsPerPage))
+  const safePage = Math.min(page, totalPages)
+  const pageStart = (safePage - 1) * rowsPerPage
+  const pageRows = filteredTxs.slice(pageStart, pageStart + rowsPerPage)
+
+  useEffect(() => { setPage(1) }, [q, catFilter, minAmt, maxAmt, rowsPerPage])
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
@@ -240,7 +316,7 @@ export default function App() {
 
       {/* Budgets grid */}
       <section className="grid md:grid-cols-3 gap-4">
-        {DISPLAY_CATS.map((cat) => {
+        {DEFAULT_CATS.map((cat) => {
           const limit = budgets[cat] ?? DEFAULT_BUDGETS[cat] ?? 0
           const spent = spentByCat[cat] ?? 0
           const pct = Math.min(100, Math.round((spent / Math.max(1, limit)) * 100))
@@ -282,9 +358,19 @@ export default function App() {
       {/* Transactions */}
       <section className="p-4 bg-white rounded-xl border">
         <h2 className="font-semibold mb-3">Transactions (this month)</h2>
+
+        {/* Toolbar */}
+        <TxToolbar
+          q={q} setQ={setQ}
+          cat={catFilter} setCat={setCatFilter}
+          min={minAmt} setMin={setMinAmt}
+          max={maxAmt} setMax={setMaxAmt}
+          rowsPerPage={rowsPerPage} setRowsPerPage={setRowsPerPage}
+        />
+
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 bg-white">
               <tr className="text-left text-gray-500 border-b">
                 <th className="py-2 pr-2">Date</th>
                 <th className="py-2 pr-2">Merchant</th>
@@ -294,7 +380,7 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {monthTxs.map(t => (
+              {pageRows.map(t => (
                 <tr key={t.id} className="border-b">
                   <td className="py-2 pr-2">
                     <input className="border rounded px-2 py-1" type="date" value={t.date}
@@ -307,7 +393,7 @@ export default function App() {
                   <td className="py-2 pr-2">
                     <select className="border rounded px-2 py-1" value={t.category}
                       onChange={(e) => updateTx(t.id, 'category', e.target.value)}>
-                      {DISPLAY_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                      {DEFAULT_CATS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </td>
                   <td className="py-2 pr-2">
@@ -320,8 +406,29 @@ export default function App() {
                   </td>
                 </tr>
               ))}
+              {pageRows.length === 0 && (
+                <tr><td colSpan={5} className="py-6 text-center text-gray-500">No transactions match your filters.</td></tr>
+              )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between mt-3 text-sm text-gray-600">
+          <div>Showing {pageStart + 1}-{Math.min(pageStart + rowsPerPage, filteredTxs.length)} of {filteredTxs.length}</div>
+          <div className="space-x-2">
+            <button
+              disabled={safePage <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              className="px-3 py-1 border rounded disabled:opacity-50"
+            >Prev</button>
+            <span>Page {safePage} / {totalPages}</span>
+            <button
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              className="px-3 py-1 border rounded disabled:opacity-50"
+            >Next</button>
+          </div>
         </div>
       </section>
 
