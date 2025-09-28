@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/Auth.tsx","./src/ErrorBoundary.tsx","./src/RuleButton.tsx","./src/Subs.tsx","./src/SubscriptionsList.tsx","./src/SubscriptionsPanel.tsx","./src/UnifiedSubscriptions.tsx","./src/main.tsx","./src/types.ts","./src/utils.ts","./src/lib/supabase.ts"],"version":"5.9.2"}

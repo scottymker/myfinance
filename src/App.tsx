@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import Papa from 'papaparse'
 import { supa } from './lib/supabase'
 import Auth from './Auth'
 import RuleButton from './RuleButton'
@@ -217,6 +216,7 @@ export default function App() {
   const userId = session.user.id
 
   async function handleCSV(file: File) {
+    const Papa = (await import('papaparse')).default || (await import('papaparse'));
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
       complete: async (res: any) => {
