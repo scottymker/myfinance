@@ -3,7 +3,7 @@ import Papa from 'papaparse'
 import { supa } from './lib/supabase'
 import Auth from './Auth'
 import RuleButton from './RuleButton'
-import SubscriptionsPanel from './SubscriptionsPanel'
+import UnifiedSubscriptions from './UnifiedSubscriptions'
 
 type Transaction = { id: string; date: string; merchant: string; category: string; amount: number }
 type BudgetMap = Record<string, number>
@@ -276,7 +276,7 @@ export default function App() {
             ))}
           </ul>
         </div>
-        <SubscriptionsPanel userId={session.user.id} />
+        <UnifiedSubscriptions userId={session.user.id} />
       </section>
 
       {/* Transactions */}
