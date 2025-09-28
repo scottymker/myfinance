@@ -12,13 +12,27 @@ export default class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false }
 
   static getDerivedStateFromError(err: unknown) {
-    const msg = (err as any)?.message ?? String(err)
-    const st  = (err as any)?.stack ?? undefined
+    // Coerce everything to string | undefined (never null)
+    const anyErr = err as any
+    const msg =
+      typeof anyErr?.message === 'string'
+        ? anyErr.message
+        : typeof err === 'string'
+        ? (err as string)
+        : String(err)
+
+    const st =
+      typeof anyErr?.stack === 'string'
+        ? (anyErr.stack as string)
+        : undefined
+
     return { hasError: true, message: msg, stack: st }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    this.setState({ compStack: info.componentStack })
+    // componentStack is string in React types, but coerce to be safe
+    const cs = typeof info.componentStack === 'string' ? info.componentStack : undefined
+    this.setState({ compStack: cs })
     console.error('ErrorBoundary caught:', error, info)
   }
 
