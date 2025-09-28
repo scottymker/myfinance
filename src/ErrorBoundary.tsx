@@ -3,22 +3,22 @@ import { Component, ErrorInfo, ReactNode } from 'react'
 type Props = { children: ReactNode }
 type State = {
   hasError: boolean
-  message: string | null
-  stack: string | null
-  compStack: string | null
+  message?: string
+  stack?: string
+  compStack?: string
 }
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: null, stack: null, compStack: null }
+  state: State = { hasError: false }
 
   static getDerivedStateFromError(err: unknown) {
     const msg = (err as any)?.message ?? String(err)
-    const st  = (err as any)?.stack ?? null
-    return { hasError: true, message: msg, stack: st, compStack: null }
+    const st  = (err as any)?.stack ?? undefined
+    return { hasError: true, message: msg, stack: st }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    this.setState({ compStack: info.componentStack || null })
+    this.setState({ compStack: info.componentStack })
     console.error('ErrorBoundary caught:', error, info)
   }
 
