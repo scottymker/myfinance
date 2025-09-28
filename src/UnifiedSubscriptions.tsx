@@ -36,18 +36,18 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
   const [subs, setSubs]     = useState<Sub[]>([])
   const [autoAddedOnce, setAutoAddedOnce] = useState(false)
 
-  // Create form
+  // create form state
   const [openForm, setOpenForm] = useState(false)
   const [merchant, setMerchant] = useState('')
   const [amount, setAmount] = useState<string>('')
-  const [lastCharge, setLastCharge] = useState<string>('') // YYYY-MM-DD
+  const [lastCharge, setLastCharge] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
+  const [makeRule, setMakeRule] = useState(true) // auto-tag future txs as Subscriptions
 
   // Load saved subs + recent transactions
   useEffect(() => {
     ;(async () => {
       setLoading(true); setError(null)
-      // Saved subs
       const { data: s, error: se } = await supa
         .from('subscriptions')
         .select('id, merchant, amount, last_charge, is_active')
@@ -55,7 +55,6 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
       if (se) { setError(se.message); setLoading(false); return }
       setSubs((s ?? []).map((r:any)=>({ ...r, amount:Number(r.amount) })))
 
-      // Recent txs (~120 days)
       const today = new Date()
       const sinceISO = new Date(today.getFullYear(), today.getMonth(), today.getDate()-120).toISOString().slice(0,10)
       const { data: t, error: te } = await supa
@@ -93,7 +92,7 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
     return found
   }, [txs])
 
-  // Auto-add new detections into subscriptions (run once after both lists are fetched)
+  // Auto-add new detections into subscriptions (run once)
   useEffect(() => {
     if (loading || autoAddedOnce) return
     ;(async () => {
@@ -106,7 +105,6 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
       const { error } = await supa.from('subscriptions').upsert(payload, { onConflict: 'user_id,merchant' })
       setAutoAddedOnce(true)
       if (!error) {
-        // refresh saved subs
         const { data: s2 } = await supa
           .from('subscriptions')
           .select('id, merchant, amount, last_charge, is_active')
@@ -117,15 +115,13 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
     })()
   }, [loading, detections, subs, userId, autoAddedOnce])
 
-  // Combined list for rendering (saved subs are the source of truth)
-  // Add a "matches" column from detections if available.
+  // Build combined list (source of truth = saved subs)
   const combined = useMemo(() => {
     const counts = new Map<string, number>()
     const lastBy = new Map<string, string>()
-    const avgBy  = new Map<string, number>()
     for (const d of detections) {
       const key = normalizeMerchant(d.merchant)
-      counts.set(key, d.count); lastBy.set(key, d.last); avgBy.set(key, d.avg)
+      counts.set(key, d.count); lastBy.set(key, d.last)
     }
     const list = subs
       .map(s => {
@@ -136,8 +132,7 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
           amount: s.amount,
           last: s.last_charge ?? lastBy.get(key) ?? null,
           matches: counts.get(key) ?? 0,
-          is_active: s.is_active,
-          saved: true
+          is_active: s.is_active
         }
       })
       .sort((a,b)=> (b.matches - a.matches) || (a.merchant.localeCompare(b.merchant)))
@@ -162,16 +157,34 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
     setSubmitting(true)
     const payload:any = { user_id: userId, merchant: merchant.trim(), amount: amt, is_active: true }
     if (lastCharge) payload.last_charge = lastCharge
-    const { error, data } = await supa.from('subscriptions').upsert(payload, { onConflict:'user_id,merchant' }).select().single()
+    const { error, data } = await supa
+      .from('subscriptions')
+      .upsert(payload, { onConflict:'user_id,merchant' })
+      .select()
+      .single()
+
+    // also create merchant rule (Subscriptions) if opted in
+    if (!error && makeRule) {
+      const m = merchant.trim()
+      await supa.from('merchant_rules').upsert(
+        { user_id: userId, merchant: m, category: 'Subscriptions' },
+        { onConflict: 'user_id,merchant' }
+      )
+    }
+
     setSubmitting(false)
     if (error) { alert(error.message); return }
     if (data) {
       setSubs(prev => {
-        const exists = prev.find(p => normalizeMerchant(p.merchant)===normalizeMerchant(data.merchant))
-        if (exists) return prev.map(p => normalizeMerchant(p.merchant)===normalizeMerchant(data.merchant) ? { ...p, amount:Number(data.amount), last_charge:data.last_charge ?? null, is_active:true } : p)
+        const idx = prev.findIndex(p => normalizeMerchant(p.merchant)===normalizeMerchant(data.merchant))
+        if (idx >= 0) {
+          const copy = [...prev]
+          copy[idx] = { id:data.id, merchant:data.merchant, amount:Number(data.amount), last_charge:data.last_charge ?? null, is_active:true }
+          return copy
+        }
         return [...prev, { id:data.id, merchant:data.merchant, amount:Number(data.amount), last_charge:data.last_charge ?? null, is_active:true }]
       })
-      setMerchant(''); setAmount(''); setLastCharge(''); setOpenForm(false)
+      setMerchant(''); setAmount(''); setLastCharge(''); setMakeRule(true); setOpenForm(false)
     }
   }
 
@@ -196,7 +209,7 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
 
       {openForm && (
         <div className="mb-4 p-3 border rounded-lg bg-gray-50">
-          <div className="grid md:grid-cols-4 gap-3 items-end">
+          <div className="grid md:grid-cols-5 gap-3 items-end">
             <div>
               <label className="block text-xs text-gray-600 mb-1">Merchant</label>
               <input className="w-full border rounded px-2 py-2" placeholder="e.g., Netflix"
@@ -213,6 +226,10 @@ export default function UnifiedSubscriptions({ userId }:{ userId:string }) {
               <input type="date" className="w-full border rounded px-2 py-2"
                      value={lastCharge} onChange={e=>setLastCharge(e.target.value)} />
             </div>
+            <label className="flex items-center gap-2 text-xs text-gray-700">
+              <input type="checkbox" className="h-4 w-4" checked={makeRule} onChange={e=>setMakeRule(e.target.checked)} />
+              Auto-categorize future charges as <span className="font-medium">Subscriptions</span>
+            </label>
             <div className="flex gap-2">
               <button onClick={createSub} disabled={submitting}
                       className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60">
