@@ -3,8 +3,7 @@ import Papa from 'papaparse'
 import { supa } from './lib/supabase'
 import Auth from './Auth'
 import RuleButton from './RuleButton'
-import Subs from './Subs'
-import SubscriptionsList from './SubscriptionsList'
+import SubscriptionsPanel from './SubscriptionsPanel'
 
 type Transaction = { id: string; date: string; merchant: string; category: string; amount: number }
 type BudgetMap = Record<string, number>
@@ -45,7 +44,7 @@ export default function App() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // Load data
+  // Load budgets, txs, rules
   useEffect(() => {
     if (!session) return
     ;(async () => {
@@ -77,7 +76,6 @@ export default function App() {
         .select('*')
         .eq('user_id', userId).gte('date', start).lte('date', end)
         .order('date', { ascending: false })
-
       if (t) setTxs(t.map(row => ({
         id: row.id, date: row.date, merchant: row.merchant, category: row.category, amount: Number(row.amount)
       })))
@@ -103,7 +101,7 @@ export default function App() {
     const d = new Date(t.date); return d >= monthStart && d <= monthEnd
   }), [txs])
 
-  // Use union of categories (defaults + any new ones the user might add later)
+  // Categories to display (defaults plus anything persisted)
   const DISPLAY_CATS = useMemo(() => {
     const set = new Set<string>([...DEFAULT_CATS, ...Object.keys(budgets || {})])
     return Array.from(set)
@@ -240,7 +238,7 @@ export default function App() {
         <div className="p-4 bg-white rounded-xl border"><div className="text-gray-500 text-sm">Progress</div><div className="text-3xl font-semibold">{todayDayOfMonth()} / {daysInMonth()}</div></div>
       </section>
 
-      {/* Budgets grid (always shows categories) */}
+      {/* Budgets grid */}
       <section className="grid md:grid-cols-3 gap-4">
         {DISPLAY_CATS.map((cat) => {
           const limit = budgets[cat] ?? DEFAULT_BUDGETS[cat] ?? 0
@@ -264,7 +262,7 @@ export default function App() {
         })}
       </section>
 
-      {/* Coach + Subscriptions */}
+      {/* Coach + Subscriptions unified panel */}
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 bg-white rounded-xl border">
           <h2 className="font-semibold mb-2">Coach</h2>
@@ -278,12 +276,7 @@ export default function App() {
             ))}
           </ul>
         </div>
-        <Subs userId={session.user.id} />
-      </section>
-
-      {/* Subscriptions manager */}
-      <section className="grid md:grid-cols-1 gap-4">
-        <SubscriptionsList userId={session.user.id} />
+        <SubscriptionsPanel userId={session.user.id} />
       </section>
 
       {/* Transactions */}
