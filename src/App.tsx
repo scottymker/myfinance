@@ -35,12 +35,14 @@ export default function App() {
   const [budgets, setBudgets] = useState<BudgetMap>(DEFAULT_BUDGETS)
   const [insights, setInsights] = useState<Insight[]>([])
 
+  // Auth session
   useEffect(() => {
     supa.auth.getSession().then(({ data }) => setSession(data.session ?? null))
     const { data: sub } = supa.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => sub.subscription.unsubscribe()
   }, [])
 
+  // Load data
   useEffect(() => {
     if (!session) return
     ;(async () => {
@@ -48,22 +50,28 @@ export default function App() {
       const userId = session.user.id
       const now = new Date(); const month = now.getMonth() + 1; const year = now.getFullYear()
 
-      const { data: b } = await supa.from('budgets')
-        .select('category, limit_amount').eq('user_id', userId).eq('month', month).eq('year', year)
+      // Budgets
+      const { data: b } = await supa
+        .from('budgets')
+        .select('category, limit_amount')
+        .eq('user_id', userId).eq('month', month).eq('year', year)
 
       if (b && b.length) {
         const map: BudgetMap = {}; for (const row of b) map[row.category] = Number(row.limit_amount); setBudgets(map)
       } else {
-        const seed = Object.entries(DEFAULT_BUDGETS).map(([category, limit_amount]) =>
-          ({ user_id: userId, category, limit_amount, month, year }))
+        const seed = Object.entries(DEFAULT_BUDGETS).map(([category, limit_amount]) => ({ user_id: userId, category, limit_amount, month, year }))
         await supa.from('budgets').insert(seed)
         setBudgets({ ...DEFAULT_BUDGETS })
       }
 
+      // Transactions (this month)
       const start = startOfMonth().toISOString().slice(0,10)
       const end = endOfMonth().toISOString().slice(0,10)
-      const { data: t } = await supa.from('transactions')
-        .select('*').eq('user_id', userId).gte('date', start).lte('date', end).order('date', { ascending: false })
+      const { data: t } = await supa
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId).gte('date', start).lte('date', end)
+        .order('date', { ascending: false })
 
       if (t) setTxs(t.map(row => ({
         id: row.id, date: row.date, merchant: row.merchant, category: row.category, amount: Number(row.amount)
@@ -87,6 +95,7 @@ export default function App() {
   const totalOutflow = Object.values(spentByCat).reduce((a, b) => a + b, 0)
   const totalBudget = Object.values(budgets).reduce((a, b) => a + b, 0)
 
+  // Coach (client-side)
   useEffect(() => {
     const list: Insight[] = []
     const day = todayDayOfMonth(), dim = daysInMonth(), pace = day / dim
