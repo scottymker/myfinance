@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
-import type { ParseResult } from 'papaparse'
 import { supa } from './lib/supabase'
 import Auth from './Auth'
+import RuleButton from './RuleButton'
 
 type Transaction = { id: string; date: string; merchant: string; category: string; amount: number }
 type BudgetMap = Record<string, number>
@@ -34,6 +34,7 @@ export default function App() {
   const [txs, setTxs] = useState<Transaction[]>([])
   const [budgets, setBudgets] = useState<BudgetMap>(DEFAULT_BUDGETS)
   const [insights, setInsights] = useState<Insight[]>([])
+  const [rules, setRules] = useState<Record<string, string>>({})
 
   // Auth session
   useEffect(() => {
@@ -76,6 +77,18 @@ export default function App() {
       if (t) setTxs(t.map(row => ({
         id: row.id, date: row.date, merchant: row.merchant, category: row.category, amount: Number(row.amount)
       })))
+
+      // Merchant rules
+      const { data: r } = await supa
+        .from('merchant_rules')
+        .select('merchant, category')
+        .eq('user_id', userId)
+      if (r) {
+        const map: Record<string,string> = {}
+        for (const row of r) map[row.merchant] = row.category
+        setRules(map)
+      }
+
       setLoading(false)
     })()
   }, [session])
@@ -138,15 +151,15 @@ export default function App() {
   async function handleCSV(file: File) {
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
-      complete: async (res: ParseResult<any>) => {
+      complete: async (res: any) => {
         const rows = (res.data as any[]).map((r) => {
           const merchant = normalizeMerchant(String(r.merchant ?? r.Merchant ?? r.description ?? r.Description ?? 'Unknown'))
-          const category = String(r.category ?? r.Category ?? 'Misc')
+          const guessed = rules[merchant] ?? String(r.category ?? r.Category ?? 'Misc')
           const rawAmt = Number(r.amount ?? r.Amount ?? r.amt ?? 0)
           const dateStr = String(r.date ?? r.Date ?? '').trim()
           const parsedDate = dateStr ? new Date(dateStr) : new Date()
           const iso = !isNaN(parsedDate as any) ? parsedDate.toISOString().slice(0,10) : new Date().toISOString().slice(0,10)
-          return { user_id: userId, date: iso, merchant, category, amount: Math.max(0, Math.abs(rawAmt)) }
+          return { user_id: userId, date: iso, merchant, category: guessed, amount: Math.max(0, Math.abs(rawAmt)) }
         })
         const { error } = await supa.from('transactions').insert(rows)
         if (error) { alert(error.message); return }
@@ -167,6 +180,11 @@ export default function App() {
 
   async function updateTx(id: string, field: keyof Transaction, value: string) {
     const patch: any = {}; patch[field] = (field === 'amount') ? Number(value) : value
+    // If merchant changed, auto-apply rule if we have one
+    if (field === 'merchant') {
+      const m = normalizeMerchant(String(value))
+      if (rules[m]) patch['category'] = rules[m]
+    }
     const { error } = await supa.from('transactions').update(patch).eq('id', id).eq('user_id', userId)
     if (!error) setTxs(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t))
   }
@@ -291,7 +309,8 @@ date,merchant,category,amount
                     <input className="border rounded px-2 py-1 text-right w-28" type="number" step="0.01" value={t.amount}
                       onChange={(e) => updateTx(t.id, 'amount', e.target.value)} />
                   </td>
-                  <td className="py-2 pr-2 text-right">
+                  <td className="py-2 pr-2 text-right space-x-2">
+                    <RuleButton userId={userId} merchant={normalizeMerchant(t.merchant)} category={t.category} />
                     <button onClick={() => removeTx(t.id)} className="text-red-600 hover:underline">Delete</button>
                   </td>
                 </tr>
