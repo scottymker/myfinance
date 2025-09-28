@@ -227,28 +227,6 @@ export default function App() {
         <div className="p-4 bg-white rounded-xl border"><div className="text-gray-500 text-sm">Progress</div><div className="text-3xl font-semibold">{todayDayOfMonth()} / {daysInMonth()}</div></div>
       </section>
 
-      <section className="grid md:grid-cols-3 gap-4">
-        {Object.entries(budgets).map(([cat, limit]) => {
-          const spent = spentByCat[cat] ?? 0
-          const pct = Math.min(100, Math.round((spent / Math.max(1, limit)) * 100))
-          return (
-            <div key={cat} className="p-4 bg-white rounded-xl border">
-              <div className="flex items-center justify-between mb-1">
-                <div className="font-medium">{cat}</div>
-                <div className="text-sm text-gray-500">{formatCurrency(spent)} / {formatCurrency(limit)}</div>
-              </div>
-              <div className="w-full h-2 bg-gray-200 rounded">
-                <div className="h-2 bg-blue-600 rounded" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="mt-2 text-xs text-gray-500">Adjust:
-                <input className="ml-2 w-24 border rounded px-2 py-1 text-right" type="number" value={limit}
-                  onChange={(e) => setBudget(cat, Number(e.target.value || 0))} />
-              </div>
-            </div>
-          )
-        })}
-      </section>
-
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 bg-white rounded-xl border">
           <h2 className="font-semibold mb-2">Coach</h2>
@@ -262,8 +240,11 @@ export default function App() {
             ))}
           </ul>
         </div>
-
         <Subs userId={userId} />
+      </section>
+
+      <section className="grid md:grid-cols-1 gap-4">
+        <SubscriptionsList userId={userId} />
       </section>
 
       <section className="p-4 bg-white rounded-xl border">
