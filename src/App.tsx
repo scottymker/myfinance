@@ -4,6 +4,7 @@ import { supa } from './lib/supabase'
 import Auth from './Auth'
 import RuleButton from './RuleButton'
 import Subs from './Subs'
+import SubscriptionsList from './SubscriptionsList'
 
 type Transaction = { id: string; date: string; merchant: string; category: string; amount: number }
 type BudgetMap = Record<string, number>
