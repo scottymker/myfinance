@@ -3,6 +3,7 @@ import Papa from 'papaparse'
 import { supa } from './lib/supabase'
 import Auth from './Auth'
 import RuleButton from './RuleButton'
+import Subs from './Subs'
 
 type Transaction = { id: string; date: string; merchant: string; category: string; amount: number }
 type BudgetMap = Record<string, number>
@@ -180,7 +181,6 @@ export default function App() {
 
   async function updateTx(id: string, field: keyof Transaction, value: string) {
     const patch: any = {}; patch[field] = (field === 'amount') ? Number(value) : value
-    // If merchant changed, auto-apply rule if we have one
     if (field === 'merchant') {
       const m = normalizeMerchant(String(value))
       if (rules[m]) patch['category'] = rules[m]
@@ -262,17 +262,7 @@ export default function App() {
           </ul>
         </div>
 
-        <div className="p-4 bg-white rounded-xl border">
-          <h2 className="font-semibold mb-2">CSV format</h2>
-          <p className="text-sm text-gray-600">Columns: <code>date, merchant, category, amount</code>. Amounts are positive (spend).</p>
-          <pre className="mt-2 text-sm bg-black text-white rounded p-3 overflow-auto">
-date,merchant,category,amount
-2025-09-01,Costco,Groceries,142.33
-2025-09-02,Shell,Fuel,42.10
-2025-09-03,Chipotle,Dining,13.25
-2025-09-04,Netflix,Entertainment,15.49
-          </pre>
-        </div>
+        <Subs userId={userId} />
       </section>
 
       <section className="p-4 bg-white rounded-xl border">
