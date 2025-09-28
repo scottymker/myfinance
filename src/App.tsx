@@ -13,7 +13,7 @@ const DEFAULT_BUDGETS: BudgetMap = {
   Groceries: 400, Dining: 200, Fuel: 150, Shopping: 200,
   Utilities: 300, Rent: 1200, Entertainment: 120, Misc: 100,
 }
-const CATEGORIES = Object.keys(DEFAULT_BUDGETS)
+const DEFAULT_CATS = Object.keys(DEFAULT_BUDGETS)
 
 function normalizeMerchant(raw: string): string {
   if (!raw) return 'Unknown'
@@ -53,18 +53,20 @@ export default function App() {
       const userId = session.user.id
       const now = new Date(); const month = now.getMonth() + 1; const year = now.getFullYear()
 
-      // Budgets
+      // Budgets: merge DB into defaults so tiles never disappear
       const { data: b } = await supa
         .from('budgets')
         .select('category, limit_amount')
         .eq('user_id', userId).eq('month', month).eq('year', year)
 
-      if (b && b.length) {
-        const map: BudgetMap = {}; for (const row of b) map[row.category] = Number(row.limit_amount); setBudgets(map)
-      } else {
+      if (!b || b.length === 0) {
         const seed = Object.entries(DEFAULT_BUDGETS).map(([category, limit_amount]) => ({ user_id: userId, category, limit_amount, month, year }))
         await supa.from('budgets').insert(seed)
         setBudgets({ ...DEFAULT_BUDGETS })
+      } else {
+        const merged: BudgetMap = { ...DEFAULT_BUDGETS }
+        for (const row of b) merged[row.category] = Number(row.limit_amount)
+        setBudgets(merged)
       }
 
       // Transactions (this month)
@@ -95,26 +97,36 @@ export default function App() {
     })()
   }, [session])
 
+  // Derived
   const monthStart = startOfMonth(), monthEnd = endOfMonth()
   const monthTxs = useMemo(() => txs.filter(t => {
     const d = new Date(t.date); return d >= monthStart && d <= monthEnd
   }), [txs])
 
+  // Use union of categories (defaults + any new ones the user might add later)
+  const DISPLAY_CATS = useMemo(() => {
+    const set = new Set<string>([...DEFAULT_CATS, ...Object.keys(budgets || {})])
+    return Array.from(set)
+  }, [budgets])
+
   const spentByCat = useMemo(() => {
-    const agg: Record<string, number> = {}; for (const c of CATEGORIES) agg[c] = 0
-    for (const t of monthTxs) { const cat = CATEGORIES.includes(t.category) ? t.category : 'Misc'
-      const amt = t.amount > 0 ? t.amount : 0; agg[cat] = (agg[cat] ?? 0) + amt }
+    const agg: Record<string, number> = {}; for (const c of DISPLAY_CATS) agg[c] = 0
+    for (const t of monthTxs) {
+      const cat = DISPLAY_CATS.includes(t.category) ? t.category : 'Misc'
+      const amt = t.amount > 0 ? t.amount : 0
+      agg[cat] = (agg[cat] ?? 0) + amt
+    }
     return agg
-  }, [monthTxs])
+  }, [monthTxs, DISPLAY_CATS])
 
   const totalOutflow = Object.values(spentByCat).reduce((a, b) => a + b, 0)
-  const totalBudget = Object.values(budgets).reduce((a, b) => a + b, 0)
+  const totalBudget = DISPLAY_CATS.reduce((a, c) => a + (budgets[c] ?? 0), 0)
 
   // Coach (client-side)
   useEffect(() => {
     const list: Insight[] = []
     const day = todayDayOfMonth(), dim = daysInMonth(), pace = day / dim
-    for (const cat of CATEGORIES) {
+    for (const cat of DISPLAY_CATS) {
       const spent = spentByCat[cat] ?? 0, limit = budgets[cat] ?? 0, expected = limit * pace
       if (limit > 0 && spent > expected + 10) {
         const over = spent - expected
@@ -136,14 +148,14 @@ export default function App() {
         detail: `Saw ${count} charges of ${formatCurrency(Number(a))} at ${m}. Verify one isn't a duplicate.` })
     }
     setInsights(list.slice(0, 5))
-  }, [spentByCat, budgets, monthTxs, totalOutflow, totalBudget])
+  }, [spentByCat, budgets, monthTxs, totalOutflow, totalBudget, DISPLAY_CATS])
 
   if (!session) {
     return (
       <div className="max-w-lg mx-auto p-6 space-y-4">
         <h1 className="text-2xl font-bold">PennyCoach — Sign in</h1>
         <Auth />
-        <p className="text-xs text-gray-500">Add http://localhost:5173 and your Netlify URL in Supabase → Auth → Redirect URLs.</p>
+        <p className="text-xs text-gray-500">Add your Netlify URL and http://localhost:5173 in Supabase → Auth → Redirect URLs.</p>
       </div>
     )
   }
@@ -221,12 +233,38 @@ export default function App() {
         </div>
       </header>
 
+      {/* Summary */}
       <section className="grid md:grid-cols-3 gap-4">
         <div className="p-4 bg-white rounded-xl border"><div className="text-gray-500 text-sm">This month spent</div><div className="text-3xl font-semibold">{formatCurrency(totalOutflow)}</div></div>
         <div className="p-4 bg-white rounded-xl border"><div className="text-gray-500 text-sm">Monthly budget</div><div className="text-3xl font-semibold">{formatCurrency(totalBudget)}</div></div>
         <div className="p-4 bg-white rounded-xl border"><div className="text-gray-500 text-sm">Progress</div><div className="text-3xl font-semibold">{todayDayOfMonth()} / {daysInMonth()}</div></div>
       </section>
 
+      {/* Budgets grid (always shows categories) */}
+      <section className="grid md:grid-cols-3 gap-4">
+        {DISPLAY_CATS.map((cat) => {
+          const limit = budgets[cat] ?? DEFAULT_BUDGETS[cat] ?? 0
+          const spent = spentByCat[cat] ?? 0
+          const pct = Math.min(100, Math.round((spent / Math.max(1, limit)) * 100))
+          return (
+            <div key={cat} className="p-4 bg-white rounded-xl border">
+              <div className="flex items-center justify-between mb-1">
+                <div className="font-medium">{cat}</div>
+                <div className="text-sm text-gray-500">{formatCurrency(spent)} / {formatCurrency(limit)}</div>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded">
+                <div className="h-2 bg-blue-600 rounded" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="mt-2 text-xs text-gray-500">Adjust:
+                <input className="ml-2 w-24 border rounded px-2 py-1 text-right" type="number" value={limit}
+                  onChange={(e) => setBudget(cat, Number(e.target.value || 0))} />
+              </div>
+            </div>
+          )
+        })}
+      </section>
+
+      {/* Coach + Subscriptions */}
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 bg-white rounded-xl border">
           <h2 className="font-semibold mb-2">Coach</h2>
@@ -240,13 +278,15 @@ export default function App() {
             ))}
           </ul>
         </div>
-        <Subs userId={userId} />
+        <Subs userId={session.user.id} />
       </section>
 
+      {/* Subscriptions manager */}
       <section className="grid md:grid-cols-1 gap-4">
-        <SubscriptionsList userId={userId} />
+        <SubscriptionsList userId={session.user.id} />
       </section>
 
+      {/* Transactions */}
       <section className="p-4 bg-white rounded-xl border">
         <h2 className="font-semibold mb-3">Transactions (this month)</h2>
         <div className="overflow-auto">
@@ -274,7 +314,7 @@ export default function App() {
                   <td className="py-2 pr-2">
                     <select className="border rounded px-2 py-1" value={t.category}
                       onChange={(e) => updateTx(t.id, 'category', e.target.value)}>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      {DISPLAY_CATS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </td>
                   <td className="py-2 pr-2">
