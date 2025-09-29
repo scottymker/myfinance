@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({ build: { sourcemap: true }, build: { sourcemap: true },
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+export default defineConfig({
   plugins: [react()],
-  server: { host: true } // allow external access in Codespaces
-})
+  base: "/",
+  server: { host: true, port: 5173 }
+});

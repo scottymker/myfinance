@@ -1,0 +1,131 @@
+import { useEffect, useState } from "react";
+import { usePC } from "../data/store";
+import { fromCents } from "../data/db";
+import { sumSpentCents, sumPlannedBudgetCents, countActiveSubs } from "../data/queries";
+import { parseCSV, mapRow } from "../utils/csv";
+import { seedDemo, resetDB } from "../data/seed";
+
+export default function Overview() {
+  const month = usePC(s=>s.month);
+  const addTx = usePC(s=>s.addTx);
+  const refreshAll = usePC(s=>s.refreshAll);
+
+  const [busy, setBusy] = useState(false);
+  const [spent, setSpent] = useState(0);
+  const [planned, setPlanned] = useState(0);
+  const [subsCount, setSubsCount] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      setBusy(true);
+      try {
+        const [s, p, n] = await Promise.all([
+          sumSpentCents(month),
+          sumPlannedBudgetCents(month),
+          countActiveSubs()
+        ]);
+        setSpent(s);
+        setPlanned(p);
+        setSubsCount(n);
+      } catch (e) {
+        console.error("Overview metrics failed", e);
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [month, refreshAll]);
+
+  const onCSV = async (file: File) => {
+    setBusy(true);
+    try {
+      const rows = await parseCSV(file);
+      let inserted = 0;
+      for (const r of rows) {
+        const m = mapRow(r);
+        if (!m.date || !m.merchant || !Number.isFinite(m.amount)) continue;
+        await addTx({ date: m.date, merchant: m.merchant, amount: m.amount });
+        inserted++;
+      }
+      await refreshAll();
+      alert(`Imported ${inserted} transactions ✔`);
+    } catch (e:any) {
+      console.error(e);
+      alert(`Import failed: ${e?.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="container">
+      <h1>PennyCoach — Personal Finance</h1>
+
+      <section style={{display:"grid", gap:16, gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))"}}>
+        <div className="section card">
+          <div className="muted">This month spent</div>
+          <div style={{fontSize:"2rem", fontWeight:700}}>{fromCents(spent)}</div>
+        </div>
+        <div className="section card">
+          <div className="muted">Monthly budget</div>
+          <div style={{fontSize:"2rem", fontWeight:700}}>{fromCents(planned)}</div>
+        </div>
+        <div className="section card">
+          <div className="muted">Total subscriptions</div>
+          <div style={{fontSize:"2rem", fontWeight:700}}>{subsCount}</div>
+        </div>
+      </section>
+
+      <section className="section" style={{display:"flex", gap:8, alignItems:"center"}}>
+        <input
+          id="csv-input"
+          type="file"
+          accept=".csv"
+          style={{display:"none"}}
+          onChange={async (e)=> {
+            const f = e.currentTarget.files?.[0];
+            if (f) await onCSV(f);
+            e.currentTarget.value = "";
+          }}
+        />
+        <button onClick={() => document.getElementById("csv-input")?.click()}>
+          Import CSV
+        </button>
+
+        <button onClick={() => alert("Add Manual (stub)")}>Add Manual</button>
+
+        <label>
+          <input id="scan-receipt" type="file" accept="image/*" capture="environment" style={{display:"none"}}
+                 onChange={(e)=> alert(e.currentTarget.files?.length ? "Receipt ready to parse (todo)" : "No file chosen")} />
+          <button onClick={() => document.getElementById("scan-receipt")?.click()}>
+            Scan Receipt
+          </button>
+        </label>
+
+        {busy && <span className="muted">Working…</span>}
+      </section>
+
+      <section className="section">
+        <h2>Coach</h2>
+        <div className="section" style={{marginTop:12}}>
+          <strong>Fuel: you're ahead of pace</strong>
+          <p className="muted">Keep daily spend low to finish on budget.</p>
+        </div>
+        <div className="section">
+          <strong>Spending is under pace</strong>
+          <p className="muted">Consider moving $50–$150 to savings.</p>
+        </div>
+      </section>
+
+      <section className="section" style={{display:"flex", gap:8}}>
+        <button onClick={async()=>{ await seedDemo(); await refreshAll(); alert("Demo data seeded ✔"); }}>
+          Seed Demo Data
+        </button>
+        <button onClick={async()=>{ await resetDB(); await refreshAll(); alert("Data reset ✔"); }}>
+          Reset Data
+        </button>
+        <span className="muted">Dev-only helpers. Affect only your browser’s local data.</span>
+        <button onClick={async()=>{ const { nukeDB } = await import("../data/seed"); await nukeDB(); await refreshAll(); alert("Local DB rebuilt ✔"); }}>Fix Local DB</button>
+      </section>
+    </main>
+  );
+}
